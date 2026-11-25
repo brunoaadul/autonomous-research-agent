@@ -1,11 +1,18 @@
 
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+from pathlib import Path
 
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+from app.auth import auth_router, require_current_user
 from app.llm.gateway import llm_gateway
 from app.schemas.llm import LLMRequest
+from app.schemas.research import ResearchRequest, ResearchResponse
 from app.research import run_research
 
+
+PUBLIC_DIR = Path(__file__).resolve().parent.parent / "public"
 
 app = FastAPI(
     title="Crokuta Research Agent",
@@ -13,18 +20,18 @@ app = FastAPI(
     version="0.2.0",
 )
 
-
-class ResearchRequest(BaseModel):
-    topic: str = Field(
-        ...,
-        min_length=3,
-        max_length=500,
-        description="The research topic to investigate",
-    )
+app.include_router(auth_router)
+app.mount(
+    "/static",
+    StaticFiles(directory=PUBLIC_DIR / "static"),
+    name="static",
+)
 
 
 @app.get("/", tags=["System"])
-def root():
+def root(request: Request):
+    if "text/html" in request.headers.get("accept", ""):
+        return FileResponse(PUBLIC_DIR / "index.html")
     return {
         "name": "Crokuta Research Agent",
         "version": "0.2.0",
@@ -37,13 +44,21 @@ def root():
     }
 
 
+@app.get("/app", include_in_schema=False)
+def web_app():
+    return FileResponse(PUBLIC_DIR / "index.html")
+
+
 @app.get("/health", tags=["System"])
 def health_check():
     return {"status": "healthy"}
 
 
 @app.post("/api/v1/llm/chat", tags=["LLM"])
-def chat_endpoint(request: LLMRequest):
+def chat_endpoint(
+    request: LLMRequest,
+    _current_user: dict = Depends(require_current_user),
+):
     try:
         return llm_gateway.generate(request)
 
@@ -77,8 +92,11 @@ def list_providers():
     }
 
 
-@app.post("/research", tags=["Research"])
-def research_endpoint(request: ResearchRequest):
+@app.post("/research", tags=["Research"], response_model=ResearchResponse)
+def research_endpoint(
+    request: ResearchRequest,
+    _current_user: dict = Depends(require_current_user),
+):
     try:
         return run_research(request.topic)
 
