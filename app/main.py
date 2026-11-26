@@ -6,8 +6,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.auth import auth_router, require_current_user
-from app.llm.gateway import llm_gateway
-from app.schemas.llm import LLMRequest
+from app.conversations import conversations_router
+from app.database import auth_store
+from app.database.errors import database_call
 from app.schemas.research import ResearchRequest, ResearchResponse
 from app.research import run_research
 
@@ -21,6 +22,7 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(conversations_router)
 app.mount(
     "/static",
     StaticFiles(directory=PUBLIC_DIR / "static"),
@@ -54,27 +56,6 @@ def health_check():
     return {"status": "healthy"}
 
 
-@app.post("/api/v1/llm/chat", tags=["LLM"])
-def chat_endpoint(
-    request: LLMRequest,
-    _current_user: dict = Depends(require_current_user),
-):
-    try:
-        return llm_gateway.generate(request)
-
-    except ValueError as error:
-        raise HTTPException(
-            status_code=400,
-            detail=str(error),
-        )
-
-    except RuntimeError as error:
-        raise HTTPException(
-            status_code=502,
-            detail=str(error),
-        )
-
-
 @app.get("/api/v1/llm/providers", tags=["LLM"])
 def list_providers():
     return {
@@ -95,13 +76,18 @@ def list_providers():
 @app.post("/research", tags=["Research"], response_model=ResearchResponse)
 def research_endpoint(
     request: ResearchRequest,
-    _current_user: dict = Depends(require_current_user),
+    current_user: dict = Depends(require_current_user),
 ):
     try:
-        return run_research(request.topic)
+        report = run_research(request.topic)
 
     except ValueError as error:
         raise HTTPException(
             status_code=400,
             detail=str(error),
         )
+    return database_call(
+        auth_store.create_conversation,
+        current_user["id"],
+        report,
+    )

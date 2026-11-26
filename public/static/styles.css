@@ -82,8 +82,13 @@ input:focus, textarea:focus { border-color: #9e8cf2; box-shadow: 0 0 0 3px rgba(
 .sidebar-action-icon { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 6px; color: var(--violet); background: #ece8ff; font-size: 18px; }
 .history-label { margin-top: 36px; }
 .history-list { display: grid; gap: 4px; margin-top: 11px; overflow-y: auto; }
+.history-row { display: flex; min-width: 0; align-items: center; gap: 2px; border-radius: 7px; }
+.history-row:hover { background: #f6f4fe; }
 .history-item { width: 100%; overflow: hidden; padding: 9px 10px; border: 0; border-radius: 7px; color: #6b6d79; background: transparent; text-align: left; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 .history-item:hover { color: #4c3bb6; background: #f6f4fe; }
+.history-delete { flex: 0 0 auto; width: 28px; height: 28px; border: 0; border-radius: 6px; color: #9a8d91; background: transparent; }
+.history-delete:hover { color: #a43746; background: #fff0f1; }
+.history-error { margin-top: 10px; padding: 8px; font-size: 10px; }
 .sidebar-bottom { margin-top: auto; }
 .account-chip { display: flex; align-items: center; gap: 9px; padding: 13px 3px 14px; border-top: 1px solid #f0eff3; }
 .avatar { display: grid; flex: 0 0 auto; width: 31px; height: 31px; place-items: center; border-radius: 50%; color: #5d4ac5; background: #efecff; font-size: 12px; font-weight: 700; }

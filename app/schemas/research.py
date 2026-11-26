@@ -18,6 +18,7 @@ class ResearchArea(BaseModel):
 
 
 class ResearchResponse(BaseModel):
+    conversation_id: str
     agent: str
     version: str
     topic: str

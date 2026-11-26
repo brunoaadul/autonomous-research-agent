@@ -5,6 +5,7 @@ const workspaceView = document.querySelector("#workspace-view");
 const authForm = document.querySelector("#auth-form");
 const authMessage = document.querySelector("#auth-message");
 const authSetup = document.querySelector("#auth-setup");
+const signupFields = document.querySelector("#signup-fields");
 const authTitle = document.querySelector("#auth-title");
 const authSubtitle = document.querySelector("#auth-subtitle");
 const authSubmit = document.querySelector("#auth-submit");
@@ -13,6 +14,7 @@ const loginTab = document.querySelector("#login-tab");
 const signupTab = document.querySelector("#signup-tab");
 const confirmWrap = document.querySelector("#confirm-wrap");
 const confirmPassword = document.querySelector("#confirm-password");
+const historyError = document.querySelector("#history-error");
 const researchForm = document.querySelector("#research-form");
 const researchTopic = document.querySelector("#research-topic");
 const researchSubmit = document.querySelector("#research-submit");
@@ -30,6 +32,7 @@ const chatError = document.querySelector("#chat-error");
 let authMode = "login";
 let session = readSession();
 let currentReport = null;
+let currentConversationId = null;
 let conversation = [];
 
 function readSession() {
@@ -119,6 +122,10 @@ function setAuthMode(mode) {
   signupTab.classList.toggle("is-active", isSignup);
   loginTab.setAttribute("aria-selected", String(!isSignup));
   signupTab.setAttribute("aria-selected", String(isSignup));
+  signupFields.hidden = !isSignup;
+  for (const field of signupFields.querySelectorAll("input")) {
+    field.required = isSignup;
+  }
   confirmWrap.hidden = !isSignup;
   confirmPassword.required = isSignup;
   document.querySelector("#password").autocomplete = isSignup ? "new-password" : "current-password";
@@ -136,50 +143,77 @@ function showAuth(message = "") {
   if (message) showNotice(authMessage, message);
 }
 
-function historyKey() {
-  return `crokuta.history.${session?.user?.id || session?.user?.email || "guest"}`;
-}
-
-function loadHistory() {
+async function loadConversation(id) {
+  hideNotice(researchError);
   try {
-    return JSON.parse(localStorage.getItem(historyKey()) || "[]");
-  } catch {
-    return [];
+    const data = await api(`/api/v1/conversations/${encodeURIComponent(id)}`);
+    currentConversationId = data.id;
+    currentReport = data.report;
+    conversation = data.messages;
+    renderReport(currentReport);
+    renderMessages();
+  } catch (error) {
+    showNotice(researchError, error.message);
   }
 }
 
-function storeHistory(items) {
-  localStorage.setItem(historyKey(), JSON.stringify(items.slice(0, 12)));
+function resetCurrentConversation() {
+  currentReport = null;
+  currentConversationId = null;
+  conversation = [];
+  report.hidden = true;
+  reportEmpty.hidden = false;
+  chatInput.disabled = true;
+  chatInput.value = "";
+  chatSubmit.disabled = true;
+  renderMessages();
 }
 
-function renderHistory() {
+async function renderHistory() {
   const list = document.querySelector("#history-list");
   list.replaceChildren();
-  for (const item of loadHistory()) {
-    const button = document.createElement("button");
-    button.className = "history-item";
-    button.type = "button";
-    button.textContent = item.topic;
-    button.title = item.topic;
-    button.addEventListener("click", () => {
-      currentReport = item;
-      conversation = [];
-      renderReport(item);
-      renderMessages();
-    });
-    list.append(button);
+  hideNotice(historyError);
+  try {
+    const items = await api("/api/v1/conversations");
+    for (const item of items) {
+      const row = element("div", "history-row");
+      const openButton = element("button", "history-item", item.title);
+      openButton.type = "button";
+      openButton.title = item.title;
+      openButton.addEventListener("click", () => loadConversation(item.id));
+
+      const deleteButton = element("button", "history-delete", "×");
+      deleteButton.type = "button";
+      deleteButton.setAttribute("aria-label", `Delete conversation: ${item.title}`);
+      deleteButton.title = "Delete conversation";
+      deleteButton.addEventListener("click", async () => {
+        if (!window.confirm(`Permanently delete "${item.title}" and its messages?`)) return;
+        try {
+          await api(`/api/v1/conversations/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+          if (currentConversationId === item.id) resetCurrentConversation();
+          await renderHistory();
+        } catch (error) {
+          showNotice(historyError, error.message);
+        }
+      });
+
+      row.append(openButton, deleteButton);
+      list.append(row);
+    }
+  } catch (error) {
+    showNotice(historyError, error.message);
   }
 }
 
-function enterWorkspace(user) {
-  const displayName = user?.email?.split("@")[0] || "Researcher";
+async function enterWorkspace(user) {
+  const displayName = user?.full_name || user?.email?.split("@")[0] || "Researcher";
   document.querySelector("#account-name").textContent = displayName;
   document.querySelector("#account-email").textContent = user?.email || "";
   document.querySelector("#account-avatar").textContent = displayName.slice(0, 1).toUpperCase();
   authView.hidden = true;
   workspaceView.hidden = false;
   hideNotice(authMessage);
-  renderHistory();
+  await renderHistory();
 }
 
 function element(tag, className, text) {
@@ -258,13 +292,6 @@ function renderMessages() {
   chatEmpty.hidden = Boolean(currentReport);
 }
 
-function saveCurrentReport(data) {
-  const history = loadHistory().filter((item) => item.topic !== data.topic);
-  history.unshift(data);
-  storeHistory(history);
-  renderHistory();
-}
-
 loginTab.addEventListener("click", () => setAuthMode("login"));
 signupTab.addEventListener("click", () => setAuthMode("signup"));
 
@@ -281,9 +308,15 @@ authForm.addEventListener("submit", async (event) => {
   authSubmit.disabled = true;
   authSubmitLabel.textContent = authMode === "signup" ? "Creating account…" : "Signing in…";
   try {
+    const request = { email, password };
+    if (authMode === "signup") {
+      request.full_name = document.querySelector("#full-name").value.trim();
+      request.phone_number = document.querySelector("#phone-number").value.trim();
+      request.country = document.querySelector("#country").value.trim();
+    }
     const data = await api(`/api/v1/auth/${authMode}`, {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify(request),
     });
     if (!data.access_token) {
       setAuthMode("login");
@@ -291,7 +324,7 @@ authForm.addEventListener("submit", async (event) => {
       return;
     }
     saveSession(data);
-    enterWorkspace(data.user);
+    await enterWorkspace(data.user);
   } catch (error) {
     showNotice(authMessage, error.message);
   } finally {
@@ -313,6 +346,7 @@ researchForm.addEventListener("submit", async (event) => {
   report.hidden = true;
   reportEmpty.hidden = true;
   currentReport = null;
+  currentConversationId = null;
   conversation = [];
   renderMessages();
   try {
@@ -320,8 +354,9 @@ researchForm.addEventListener("submit", async (event) => {
       method: "POST",
       body: JSON.stringify({ topic }),
     });
+    currentConversationId = currentReport.conversation_id;
     renderReport(currentReport);
-    saveCurrentReport(currentReport);
+    await renderHistory();
     researchTopic.value = "";
   } catch (error) {
     reportEmpty.hidden = false;
@@ -346,22 +381,15 @@ chatForm.addEventListener("submit", async (event) => {
   chatSubmit.disabled = true;
   renderMessages();
 
-  const context = `You are a helpful research assistant. The current report is a preliminary framework, not source-verified research. Do not invent citations or claim that external sources were retrieved. Be clear about uncertainty.\n\nTopic: ${currentReport.topic}\nSummary: ${currentReport.executive_summary}\nResearch questions: ${(currentReport.research_questions || []).join(" | ")}`;
-  const messages = [
-    { role: "system", content: context },
-    ...conversation.slice(-10),
-  ];
   try {
     const provider = document.querySelector("#provider").value;
     const model = provider === "ollama" ? "llama3.1" : provider === "openai" ? "gpt-4o-mini" : provider === "anthropic" ? "claude-3-5-sonnet-20241022" : provider === "gemini" ? "gemini-1.5-flash" : provider === "groq" ? "llama-3.1-8b-instant" : "auto";
-    const result = await api("/api/v1/llm/chat", {
+    const result = await api(`/api/v1/conversations/${encodeURIComponent(currentConversationId)}/messages`, {
       method: "POST",
-      body: JSON.stringify({ provider, model, messages }),
+      body: JSON.stringify({ provider, model, content: prompt }),
     });
     conversation.push({ role: "assistant", content: result.content });
   } catch (error) {
-    conversation.pop();
-    conversation.push({ role: "user", content: prompt });
     showNotice(chatError, error.message);
   } finally {
     chatSubmit.disabled = !chatInput.value.trim();
@@ -378,13 +406,8 @@ document.querySelectorAll("[data-prompt]").forEach((button) => {
 });
 
 document.querySelector("#new-research").addEventListener("click", () => {
-  currentReport = null;
-  conversation = [];
-  report.hidden = true;
-  reportEmpty.hidden = false;
+  resetCurrentConversation();
   chatEmpty.hidden = false;
-  chatInput.disabled = true;
-  chatSubmit.disabled = true;
   researchTopic.focus();
 });
 
@@ -395,8 +418,7 @@ document.querySelector("#logout").addEventListener("click", async () => {
     // The local session is cleared even if the remote session has already expired.
   }
   saveSession(null);
-  currentReport = null;
-  conversation = [];
+  resetCurrentConversation();
   showAuth();
 });
 
@@ -421,7 +443,7 @@ async function initialize() {
     const user = await api("/api/v1/auth/me");
     session.user = user;
     saveSession(session);
-    enterWorkspace(user);
+    await enterWorkspace(user);
   } catch {
     saveSession(null);
   }
